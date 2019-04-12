@@ -1,0 +1,7 @@
+INPUT VARIABLES
+param 0
+N 200
+input structure 1: final_3gj0.pdb
+input structure 2: final_1k5d.pdb
+mod file: GNP_MG_1k5d_0.pdb
+weight 0.3
