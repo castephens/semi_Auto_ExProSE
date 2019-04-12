@@ -1,0 +1,168 @@
+Protocol for Installing and Using ExProSE for Allosteric Modulation
+Author: Christina Stephens
+Date: 04/12/2019
+
+ExProSE/ ProteinEnsembles.jl is computational method to generate ensembles of protein structures that stochastically satisfy a set of distance constraints derived from the atom-specific interactions in input structures of the same protein (sequence) in different conformations. ExProSE automatically runs Principal Component Analysis (PCA) of ensemble structures. Additional distance constraints can optionally be applied by providing a specifically formatted coordinate file.
+
+See Greener et al., Structure (2017) for full details of the method 
+
+I was using this software to add additional constraints to the ensemble to simulate the effect of allosteric binding on Ran conformational populations. I made several modifications to the ExProSE source code to test the effect of small modulations. 
+
+Requires:
+ProteinEnsebles.jl 	(https://github.com/jgreener64/ProteinEnsembles.jl)
+dssp 			(https://swift.cmbi.umcn.nl/gv/dssp/DSSP_5.html)
+Julia 0.7 		(https://julialang.org/downloads/)
+TMscore		(https://zhanglab.ccmb.med.umich.edu/TM-score/)
+
+Scripts for semi-automated and example input files run can be downloaded or pulled from: 
+
+Replace the following ProteinEnsembles.jl source code scripts with the identically named files in the repo in order to (1) output all PC magnitudes (2) read tolerance weights from the additional constraint file:
+io.jl
+perturb.jl
+	pipeline.jl
+
+Notes for optimizing input structures (not necessary):
+	Check PDB-redo (https://pdb-redo.eu/db/3gj0) and download most recently remodeled structure
+	Use Pymol to select, align, and extract new PDBs for desired chain(s) for input structures
+	Submit each aligned PDB to MolProbity (http://molprobity.biochem.duke.edu/) for dihedral angle optimization
+	Allow Asn/Gln/His flips
+	Electron cloud H-x distances
+
+All hetero atoms and hydrogens are automatically removed by ExProSE. Polar hydrogens are added automatically
+
+
+Format Additional Constraint File:
+ExProSE was originally developed to read in results from a separate server and reformat them into coordinate files for additional constraints. Since you already have the coordinates you want to use for additional restraints, you need to manually format this to be read by ExProSE, fortunately this looks a lot like a PDB file. 
+
+Original:
+HETATM 3311  PA  GNP A 250      17.886  10.927 -11.210  1.00 42.10           P
+HETATM 3312  PB  GNP A 250      15.831  11.284 -13.221  1.00 38.07           P
+HETATM 3313  PG  GNP A 250      14.436  13.803 -14.497  1.00 46.22           P
+
+ExProSE re-format: 
+REMARK   Pocket number in 0  number column
+HETATM 3311  PA  GNP 0  1       17.886  10.927 -11.210  1.00 42.10           P
+HETATM 3312  PB  GNP 0  1       15.831  11.284 -13.221  1.00 38.07           P
+HETATM 3313  PG  GNP 0  1       14.436  13.803 -14.497  1.00 46.22           P
+
+You can simply copy the lines in a PDB file that correspond to the atoms you wish to use for additional constraints and add the header seen in the above example. Column 5 and 6 in the ExProSE reformat correspond to the tolerance weight applied only to the additional constraints and the number assigned to each set of additional constraints. Since you will liked only be running one set at a time column 6 should always be 1. 
+
+This may be case-specific but you use the following sed command to reformat the columns:
+
+For column 5:
+$ sed -i "s/[^[:blank:]]\{1,\}/0/5" <pdb>
+
+For column 6: 
+$ sed -i "s/[^[:blank:]]\{1,\}/1/6" <pdb>
+	
+You may need to adjust the highlighted regions (add spaces) to maintain the correct column position the xyz coordinates. Compare to the example input file (‘P184_1k5d_dummy.pdb’) to check that your file matches the exact spacing (this is very important, otherwise ExProSE can’t read the coordinates). 
+
+ExProSE expects at least 120 points in the additional constraint file. If your additional constraint file has less than 120 points, the developer suggested copying these coordinates into the same file until you have at least 120 points. 
+
+
+
+Make Artificial Additional Constraint Coordinates:
+If you choose a single residue to restrain, and want to increase the effect of the perturbation in that location, you can create uniform ‘ball’ of coordinates built around the coordinates of a single atom (say the Cα). Use the following steps:
+
+            $ python3 make_dummy_sphere.py x_coord y_coord z_coord
+
+Then open the new file ‘dummy_sphere.pml’ in pymol (by the way you should have pymol). This will create a new pdb file ‘dummy_sphere.pdb’. This is your additional restraint file. 
+Adjust the file to match the formatting shown above. 
+
+Manual Run: 
+You can consult the ExproSE github for a complete instructions, here is just a sample execution for with all options for (1) tolerance weight optimization and (2) single run with all options
+
+Generate the secondary structure input files (.dssp):
+mkdssp -i input_1.pdb -o input_1.dssp
+
+Optimize:
+$ julia07 ~/.julia/packages/ProteinEnsembles/USEqV/bin/exprose-param --i1 input_1.pdb --d2 input_1.dssp --i2 input_2.pdb –-d2 input_2.dssp -n N -o exprose_param -t TMScore
+
+Run:
+$ julia07 ~/.julia/packages/ProteinEnsembles/USEqV/bin/exprose --i1 input_1.pdb --d2 input_1.dssp --i2 input_2.pdb –-d2 input_2.dssp -n N -o exprose -w weight -l mod_file -m 1 -e extra.pdb
+
+
+
+Semi-Automated Run:
+‘master_script_ExProSE.sh’ wraps execution the of ProteinEnsembles.jl, cleans some of the output produced by the modified sourced scripts, saves input files/options, and prepares pymol sessions to visualize RMSFs on the input structures. The master script handles the following arguments and formats, which are similar to ProteinEnsembles.jl
+
+-p    parameterization option			 Y or N
+-s     starting structures 			 “$PATH/input1.pdb $PATH/input2.pdb”
+-n    desired number of structures 		 integer value
+-w    whole ensemble tolerance weight	 [0.0,1.0]
+-m    additional constraint coord. file      	 mod.pdb
+-e     extra pdbs for PCA			 single column text file of pdb full path filenames
+
+If you specify ‘Y’ for -p, the script with optimize the tolerance weight, save the weight, delete the output from that ProteinEnsembles.jl and execute a normal ensemble generation with the new weight. 
+
+
+Iteratively run with increasing weight tolerance for additional constraints only:
+‘run_inter_mol_tol.sh’ and ‘run_inter_mol_tol_2.sh’
+
+You need to edit these scripts to your own specifications. These scripts were meant to explore the strength of effect of adding additional constraints to the ensemble. Using at least 3 (default) weights generally shows a significant difference In the pairwise PCA plots. You need to change the name of the additional constraint file (mod), its path (mod_loc) and the specifications for the master script execution. ‘run_inter_mol_tol_2.sh’ is for running 2 additional constrain files for one ensemble. 
+
+The output:
+‘master_script_ExProSE.sh’ checks the $CWD for pre-existing ExproSE output files, and assigns the lowest, unused integer value for the current run. 
+
+Main output directory: ‘Exprose_run_0<run_number>/’
+Input structure files, additional constraint file, log file (exprose.log)
+
+Main Subdirectory: ‘exprose/’
+Content produced by modifications to scripts, consult ExProSE github for full description of original output. 
+pymol/  	- txt files and pymol sessions for the magnitudes each principle component. 
+mod_1/ 	- color_by_rmsfs_ratio.pml, color_by_rmsfs.pml
+
+	
+Run the example (full parameterization and full run, ~ 30 minutes):
+$ bash master_script_ExProSE.sh -p Y -s "final_3gj0.pdb final_1k5d.pdb" -n 50 -w 0.3 -m GNP_MG_1k5d.pdb
+	
+Run the example with increasing additional constraint tolerance weight:
+     $ bash run_inter_mol_tol.sh
+	
+             $ bash  run_inter_mol_tol_2.sh
+
+
+I recommend using nohup & since multiple runs, especially with N > 50, can take some time. 
+
+
+
+
+Analysis of ExProSE output:
+
+K-means Cluster Analysis
+‘Cluster_PCs.ipynb’ is a py3 jupyter notebook I wrote (and you will need to edit to your specifications) to systematically recover which ensemble structures belong to clearly separable clusters according to their principal component values. This script clusters (1) pairwise with all PCs explaining 90% of the ensemble variation, and then (2) using all of those same PCs simultaneously. All thresholds for silhouette scores for a give K-means run with n number of clusters are relative to a run of ExProSE with no clear clusters of structures. Each cluster selected from either (1) or (2) are organized into Pymol sessions to visualize individual clusters. The structure closest to the geometric center of a single cluster is also outputted (I used these structures as input to PyRosetta)
+
+ You can optionally run the second segment of the notebook to align structures within each cluster to an average structure or reference structure and out average root squared fluctuations (RSFs), average root mean squared deviations (RMSDs), and distance between selected residues within RAN. 
+
+You should specify a directory that contains the following as your ‘sys_dir’:
+	All PDB files for a desired ensemble
+	pcs.tsv (look in /exprose/pcs/)
+	evals_spread.tsv (look in /exprose/pcs/)
+	pcs_input_1.tsv and pcs_input_2.tsv (look in /exprose/pcs/)
+	input_1.pdb and input_2.pdb (look in /exprose/pcs/)
+
+If you print the silhouette scores and see that the first couple of scores are high and close (within 0.1), that means that selecting 2 vs 3 clusters are similarly ‘good’. If you are interested in dissecting more subtly differences within your ensemble, you might want to select a higher number of clusters manually. Change the index to equal the correct value where specified in the script. 
+
+The last (third) segment of the script I was using to explore where low variance PCs describe conformational change. If you are looking for some very small changes between structures in the entire ensemble, or your large clusters, you can try to leverage this information…
+
+Please set the ‘sys_dir’ to the full path to /exprose/pymol/). 
+
+
+PyRosetta score, repack, and relax
+If you are interested in creating a perhaps for realistic structural model from each conformational cluster, use the following. I used the structures closest to the geometric centers of each cluster, outputted by ‘Cluster_PCs.ipynb’.l 
+You must have both a Rosetta and a PyRosetta installation to run ‘packing_and_relax_rosetta.py’. 
+
+$python3 packing_and_relax_rosetta.py <filename>
+
+The filename should be the name of your input coordinate file without the ‘.pdb’ 
+
+The script should output three structures (a repacked, a relaxes, and a repacked+ relaxed) and their Rosetta scores. 
+
+I couldn’t get this to produce consistently lower score values to for the relaxed structures. You may need to play around with the relaxation constrain specifications. 
+
+
+_____________________________________________________________________________
+
+
+I tested all of this before I sent this out, but contact me at christina.stephens@uscf.edu if you have any questions or errors you can’t fix. 
+
